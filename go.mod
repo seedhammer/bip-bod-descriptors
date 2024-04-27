@@ -1,4 +1,4 @@
-module github.com/seedhammer/bip-psbt-descriptors
+module github.com/seedhammer/bip-bod-descriptors
 
 go 1.21.1
 

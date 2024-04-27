@@ -9,55 +9,17 @@ import (
 	"io"
 )
 
-type File struct {
-	Global []Entry
-	Input  []Entry
-	Output []Entry
-}
-
-const (
-	magic                      = "psbt\xff"
-	GLOBAL_UNSIGNED_TX KeyType = 0x00
-	GLOBAL_XPUB        KeyType = 0x01
-)
+type Map []Entry
 
 type KeyType uint64
-
-type ExtendedKey struct {
-	MasterFingerprint uint32
-	Path              []uint32
-	Key               []byte
-}
-
-func DecodeXPUB(e Entry) (ExtendedKey, error) {
-	if e.Type != GLOBAL_XPUB {
-		return ExtendedKey{}, errors.New("psbt: map entry not a PSBT_GLOBAL_XPUB")
-	}
-	val := e.Value
-	if len(val) < 4 || len(val)%4 != 0 {
-		return ExtendedKey{}, io.ErrUnexpectedEOF
-	}
-	k := ExtendedKey{
-		Key: e.Key,
-	}
-	k.MasterFingerprint = binary.BigEndian.Uint32(val)
-	val = val[4:]
-	for len(val) > 0 {
-		p := binary.LittleEndian.Uint32(val)
-		val = val[4:]
-		k.Path = append(k.Path, p)
-	}
-	return k, nil
-}
 
 type Entry struct {
 	Type       KeyType
 	Key, Value []byte
 }
 
-func Encode(w *bytes.Buffer, f File) {
+func Encode(magic string, w *bytes.Buffer, maps []Map) {
 	w.Write([]byte(magic))
-	maps := [][]Entry{f.Global, f.Input, f.Output}
 	for _, m := range maps {
 		for _, e := range m {
 			buf := new(bytes.Buffer)
@@ -95,29 +57,27 @@ func EncodeVarUInt(w *bytes.Buffer, v uint64) {
 	}
 }
 
-func Decode(data []byte) (File, int, error) {
+func Decode(magic string, data []byte) ([]Map, int, error) {
 	if !bytes.HasPrefix(data, []byte(magic)) {
-		return File{}, 0, errors.New("psbt: invalid magic")
+		return nil, 0, errors.New("psbt: invalid magic")
 	}
 	total := len(magic)
+	data = data[total:]
 
-	maps := make([][]Entry, 3)
-	for i := range maps {
-		m, n, err := DecodeMap(data[total:])
+	var maps []Map
+	for len(data) > 0 {
+		m, n, err := DecodeMap(data)
 		total += n
 		if err != nil {
-			return File{}, total, fmt.Errorf("psbt: %w", err)
+			return nil, total, fmt.Errorf("psbt: %w", err)
 		}
-		maps[i] = m
+		data = data[n:]
+		maps = append(maps, m)
 	}
-	return File{
-		Global: maps[0],
-		Input:  maps[1],
-		Output: maps[2],
-	}, total, nil
+	return maps, total, nil
 }
 
-func DecodeMap(data []byte) ([]Entry, int, error) {
+func DecodeMap(data []byte) (Map, int, error) {
 	var m []Entry
 	n := 0
 	for {
